@@ -404,13 +404,14 @@ static void socket_writeable(aeEventLoop *loop, int fd, void *data, int mask) {
     size_t len = c->length  - c->written;
     size_t n;
 
-    switch (sock.write(c, buf, len, &n)) {
+    switch (sock.write(c, buf, 1, &n)) {
         case OK:    break;
         case ERROR: goto error;
         case RETRY: return;
     }
-
     c->written += n;
+    //printf("%lu bytes written, %lu bytes remaining\n", c->written, (c->length - c->written));
+    sleep(0);
     if (c->written == c->length) {
         c->written = 0;
         aeDeleteFileEvent(loop, fd, AE_WRITABLE);
