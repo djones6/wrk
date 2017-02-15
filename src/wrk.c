@@ -11,6 +11,7 @@ static struct config {
     uint64_t timeout;
     uint64_t pipeline;
     uint64_t interval;
+    uint64_t readdelay;
     bool     delay;
     bool     dynamic;
     bool     latency;
@@ -49,6 +50,7 @@ static void usage() {
            "    -d, --duration    <T>  Duration of test           \n"
            "    -t, --threads     <N>  Number of threads to use   \n"
            "    -i, --interval    <T>  Throughput reporting interval \n"
+           "    -l, --readdelay   <T>  Delay reading responses (ms) \n"
            "                                                      \n"
            "    -s, --script      <S>  Load Lua script file       \n"
            "    -H, --header      <H>  Add header to request      \n"
@@ -463,6 +465,12 @@ static void socket_readable(aeEventLoop *loop, int fd, void *data, int mask) {
     connection *c = data;
     size_t n;
 
+        if (cfg.readdelay > 0) {
+            struct timeval tv;
+            tv.tv_sec = cfg.readdelay / 1000000;
+            tv.tv_usec = (cfg.readdelay % 1000000);
+            select(0, NULL, NULL, NULL, &tv);
+        }
     do {
         switch (sock.read(c, &n)) {
             case OK:    break;
@@ -506,6 +514,7 @@ static struct option longopts[] = {
     { "connections", required_argument, NULL, 'c' },
     { "duration",    required_argument, NULL, 'd' },
     { "interval",    required_argument, NULL, 'i' },
+    { "readdelay",   required_argument, NULL, 'l' },
     { "threads",     required_argument, NULL, 't' },
     { "script",      required_argument, NULL, 's' },
     { "header",      required_argument, NULL, 'H' },
@@ -526,8 +535,9 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
     cfg->duration    = 10;
     cfg->timeout     = SOCKET_TIMEOUT_MS;
     cfg->interval    = 0;
+    cfg->readdelay   = 0;
 
-    while ((c = getopt_long(argc, argv, "t:c:d:i:s:H:T:Lrv?", longopts, NULL)) != -1) {
+    while ((c = getopt_long(argc, argv, "t:c:d:i:l:s:H:T:Lrv?", longopts, NULL)) != -1) {
         switch (c) {
             case 't':
                 if (scan_metric(optarg, &cfg->threads)) return -1;
@@ -540,6 +550,10 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
                 break;
             case 'i':
                 if (scan_time(optarg, &cfg->interval)) return -1;
+                break;
+            case 'l':
+                if (scan_metric(optarg, &cfg->readdelay)) return -1;
+                cfg->readdelay *= 1000;   // microseconds
                 break;
             case 's':
                 cfg->script = optarg;
@@ -578,6 +592,9 @@ static int parse_args(struct config *cfg, char **url, struct http_parser_url *pa
         return -1;
     }
 
+    // Adjust read delay to take into account connections per thread
+    cfg->readdelay *= cfg->threads;
+    cfg->readdelay /= cfg->connections;
     *url    = argv[optind];
     *header = NULL;
 
